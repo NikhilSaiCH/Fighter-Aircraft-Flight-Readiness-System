@@ -1,65 +1,119 @@
-import numpy as np
-
-
 class FlightReadinessEvaluator:
     """
-    Final decision engine for fighter aircraft flight readiness.
-    Calibrated to distinguish healthy variance from real degradation.
+    Fighter Aircraft Flight Readiness Decision Engine
+    (Category II – Safety-Critical)
+
+    Decision priority:
+    1. Hard fighter aircraft safety limits
+    2. Degradation trends
+    3. ML anomaly evidence (supporting only)
     """
 
     def evaluate(
         self,
-        engine_health_index,
-        anomaly_scores,
-        trend_summary,
-        governance_status,
-        root_causes
+        flight_df,
+        feature_df,
+        anomaly_ratio: float,
+        trend_slope: float,
     ):
         issues = []
+        recommendations = []
 
-        # ----------------- Governance -----------------
-        if governance_status != "PASS":
-            issues.append("Data governance validation failed")
+        # ================================
+        # 1️⃣ HARD SAFETY PARAMETER CHECKS
+        # ================================
 
-        # ----------------- Anomaly Assessment -----------------
-        # Isolation-based models always flag some anomalies.
-        # Use ratio instead of absolute count.
-        critical_anomalies = anomaly_scores < -0.3
-        anomaly_ratio = critical_anomalies.sum() / len(anomaly_scores)
+        # ---- Engine Temperature (EGT) ----
+        mean_egt = flight_df["exhaust_gas_temp_c"].mean()
+        if mean_egt > 750:
+            issues.append(
+                f"Exhaust Gas Temperature too high (avg {mean_egt:.1f} °C)"
+            )
+            recommendations.append(
+                "Inspect engine cooling system, fuel-air mixture, and turbine blades"
+            )
 
-        if anomaly_ratio > 0.10:  # >10% is concerning
-            issues.append("High frequency of critical anomalies detected")
+        # ---- Engine RPM ----
+        max_rpm = flight_df["rpm_n1_pct"].max()
+        if max_rpm > 100:
+            issues.append(
+                f"Engine RPM exceeds safe limit (max {max_rpm:.1f}%)"
+            )
+            recommendations.append(
+                "Check throttle control, FADEC system, and engine governor"
+            )
 
-        # ----------------- Engine Health -----------------
-        avg_health = float(np.mean(engine_health_index))
+        # ---- Oil Pressure ----
+        min_oil_pressure = flight_df["oil_pressure_psi"].min()
+        if min_oil_pressure < 40:
+            issues.append(
+                f"Oil pressure below safe limit (min {min_oil_pressure:.1f} psi)"
+            )
+            recommendations.append(
+                "Inspect lubrication system, oil pump, and oil lines"
+            )
 
-        if avg_health < 0.65:
-            issues.append("Low overall engine health index")
+        # ---- Oil Temperature ----
+        max_oil_temp = flight_df["oil_temp_c"].max()
+        if max_oil_temp > 120:
+            issues.append(
+                f"Oil temperature exceeds safe limit (max {max_oil_temp:.1f} °C)"
+            )
+            recommendations.append(
+                "Check oil cooling system and reduce engine thermal stress"
+            )
 
-        # ----------------- Trend Assessment -----------------
-        # Ignore trend for very short datasets
-        if (
-            trend_summary.get("trend") == "DEGRADING"
-            and len(engine_health_index) > 300
-        ):
-            issues.append("Degrading performance trend detected")
+        # ---- Structural G-load ----
+        if "g_total" in feature_df.columns:
+            max_g = feature_df["g_total"].max()
+            if max_g > 9:
+                issues.append(
+                    f"Excessive G-load detected (max {max_g:.2f} g)"
+                )
+                recommendations.append(
+                    "Inspect airframe structure and restrict high-G maneuvers"
+                )
 
-        # ----------------- Root Cause -----------------
-        if root_causes:
-            issues.append("Underlying technical root causes identified")
+        # ================================
+        # 2️⃣ TREND-BASED DEGRADATION CHECK
+        # ================================
 
-        # ----------------- Final Decision -----------------
+        if trend_slope < -0.10:
+            issues.append(
+                "Sustained degradation trend observed in engine health"
+            )
+            recommendations.append(
+                "Schedule preventive maintenance and detailed engine inspection"
+            )
+
+        # ================================
+        # 3️⃣ ML ANOMALY SUPPORT CHECK
+        # ================================
+
+        if anomaly_ratio > 0.25:
+            issues.append(
+                f"High anomaly rate detected ({anomaly_ratio:.2f})"
+            )
+            recommendations.append(
+                "Investigate abnormal sensor patterns and validate subsystems"
+            )
+
+        # ================================
+        # FINAL DECISION
+        # ================================
+
         if issues:
-            status = "NOT READY FOR FLIGHT"
-        else:
-            status = "READY FOR FLIGHT"
+            return {
+                "status": "NOT READY",
+                "issues": issues,
+                "recommendations": recommendations,
+            }
 
         return {
-            "status": status,
-            "issues": issues,
-            "summary": (
-                "All systems operating within acceptable limits."
-                if status == "READY FOR FLIGHT"
-                else "Operational issues detected requiring attention."
-            )
+            "status": "READY",
+            "issues": [],
+            "recommendations": [
+                "Proceed with standard pre-flight inspection",
+                "Aircraft parameters within Category II operational limits",
+            ],
         }
